@@ -120,12 +120,21 @@ func (s mediaFileMapper) mapAlbumName(md metadata.Tags) string {
 	return name
 }
 
+func (s mediaFileMapper) mapMbzAlbumID(md metadata.Tags) string {
+	id := md.MbzAlbumID()
+	if id == "" {
+		return "00000000-0000-0000-0000-000000000000";
+	}
+
+	return id
+}
+
 func (s mediaFileMapper) trackID(md metadata.Tags) string {
 	return fmt.Sprintf("%x", md5.Sum([]byte(md.FilePath())))
 }
 
 func (s mediaFileMapper) albumID(md metadata.Tags) string {
-	albumPath := strings.ToLower(fmt.Sprintf("%s\\%s", s.mapAlbumArtistName(md), s.mapAlbumName(md)))
+	albumPath := strings.ToLower(fmt.Sprintf("%s\\%s\\%s", s.mapMbzAlbumID(md), s.mapAlbumArtistName(md), s.mapAlbumName(md)))
 	return fmt.Sprintf("%x", md5.Sum([]byte(albumPath)))
 }
 
