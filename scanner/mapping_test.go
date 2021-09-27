@@ -35,7 +35,7 @@ var _ = Describe("mapping", func() {
 			ds := &tests.MockDataStore{}
 			gr = ds.Genre(ctx)
 			gr = newCachedGenreRepository(ctx, gr)
-			mapper = newMediaFileMapper("/", gr)
+			mapper = newMediaFileMapper("/", gr, false)
 		})
 
 		It("returns empty if no genres are available", func() {

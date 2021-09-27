@@ -84,7 +84,13 @@ func (s *TagScanner) Scan(ctx context.Context, lastModifiedSince time.Time, prog
 	var changedDirs []string
 	s.cnt = &counters{}
 	genres := newCachedGenreRepository(ctx, s.ds.Genre(ctx))
-	s.mapper = newMediaFileMapper(s.rootFolder, genres)
+
+	useMbzIds, err := s.ds.Property(ctx).DefaultGetBool(model.PropUsingMbzIDs, false)
+	if err != nil {
+		return 0, err
+	}
+
+	s.mapper = newMediaFileMapper(s.rootFolder, genres, useMbzIds)
 
 	foldersFound, walkerError := s.getRootFolderWalker(ctx)
 	for {
