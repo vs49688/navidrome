@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/deluan/sanitize"
+	"github.com/google/uuid"
 	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/consts"
 	"github.com/navidrome/navidrome/model"
@@ -19,12 +20,14 @@ import (
 type mediaFileMapper struct {
 	rootFolder string
 	genres     model.GenreRepository
+	useMbzIDs  bool
 }
 
-func newMediaFileMapper(rootFolder string, genres model.GenreRepository) *mediaFileMapper {
+func newMediaFileMapper(rootFolder string, genres model.GenreRepository, useMbzIDs bool) *mediaFileMapper {
 	return &mediaFileMapper{
 		rootFolder: rootFolder,
 		genres:     genres,
+		useMbzIDs:  useMbzIDs,
 	}
 }
 
@@ -124,20 +127,46 @@ func (s mediaFileMapper) mapAlbumName(md metadata.Tags) string {
 	return name
 }
 
+func (s mediaFileMapper) mapMbzID(id string) string {
+	if !s.useMbzIDs {
+		return ""
+	}
+
+	if _, err := uuid.Parse(id); err != nil {
+		return ""
+	}
+
+	return id
+}
+
 func (s mediaFileMapper) trackID(md metadata.Tags) string {
+	if mbzID := s.mapMbzID(md.MbzReleaseTrackID()); mbzID != "" {
+		return mbzID
+	}
+
 	return fmt.Sprintf("%x", md5.Sum([]byte(md.FilePath())))
 }
 
 func (s mediaFileMapper) albumID(md metadata.Tags) string {
+	if id := s.mapMbzID(md.MbzAlbumID()); id != "" {
+		return id
+	}
+
 	albumPath := strings.ToLower(fmt.Sprintf("%s\\%s", s.mapAlbumArtistName(md), s.mapAlbumName(md)))
 	return fmt.Sprintf("%x", md5.Sum([]byte(albumPath)))
 }
 
 func (s mediaFileMapper) artistID(md metadata.Tags) string {
+	if id := s.mapMbzID(md.MbzArtistID()); id != "" {
+		return id
+	}
 	return fmt.Sprintf("%x", md5.Sum([]byte(strings.ToLower(s.mapArtistName(md)))))
 }
 
 func (s mediaFileMapper) albumArtistID(md metadata.Tags) string {
+	if id := s.mapMbzID(md.MbzAlbumArtistID()); id != "" {
+		return id
+	}
 	return fmt.Sprintf("%x", md5.Sum([]byte(strings.ToLower(s.mapAlbumArtistName(md)))))
 }
 
