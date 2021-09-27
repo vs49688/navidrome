@@ -15,7 +15,7 @@ var _ = Describe("mapping", func() {
 	Describe("mediaFileMapper", func() {
 		var mapper *mediaFileMapper
 		BeforeEach(func() {
-			mapper = newMediaFileMapper("/music", nil)
+			mapper = newMediaFileMapper("/music", nil, false)
 		})
 		Describe("mapTrackTitle", func() {
 			It("returns the Title when it is available", func() {
@@ -52,7 +52,7 @@ var _ = Describe("mapping", func() {
 			ds := &tests.MockDataStore{}
 			gr = ds.Genre(ctx)
 			gr = newCachedGenreRepository(ctx, gr)
-			mapper = newMediaFileMapper("/", gr)
+			mapper = newMediaFileMapper("/", gr, false)
 		})
 
 		It("returns empty if no genres are available", func() {
