@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	. "github.com/Masterminds/squirrel"
@@ -56,6 +57,15 @@ func (r propertyRepository) DefaultGet(id string, defaultValue string) (string, 
 		return defaultValue, err
 	}
 	return value, nil
+}
+
+func (r propertyRepository) DefaultGetBool(id string, defaultValue bool) (bool, error) {
+	val, err := r.DefaultGet(id, strconv.FormatBool(defaultValue))
+	if err != nil {
+		return false, err
+	}
+
+	return strconv.ParseBool(val)
 }
 
 func (r propertyRepository) Delete(id string) error {
