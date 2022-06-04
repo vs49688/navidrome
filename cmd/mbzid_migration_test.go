@@ -103,7 +103,106 @@ func createKamelotExample() model.DataStore {
 }
 
 func TestArtistMbzIDMigrations(t *testing.T) {
+	var err error
 
+	ctx := context.Background()
+	ds := &tests.MockDataStore{}
+
+	artistRepo := ds.Artist(ctx)
+	albumRepo := ds.Album(ctx)
+	mfRepo := ds.MediaFile(ctx)
+
+	_ = artistRepo.Put(&model.Artist{
+		ID:          "sample-artist",
+		MbzArtistID: "96a06efa-7f64-4e4f-9dfc-2a834b16e805",
+		Annotations: model.Annotations{PlayCount: 2},
+	})
+
+	_ = artistRepo.Put(&model.Artist{
+		ID:          "sample-album-artist",
+		MbzArtistID: "6b5959fa-6e66-43c6-b319-1d4c7304df99",
+		Annotations: model.Annotations{PlayCount: 1},
+	})
+	_ = artistRepo.Put(&model.Artist{ID: "sample-artist-no-mbz", MbzArtistID: ""})
+
+	_ = albumRepo.Put(&model.Album{
+		ID:               "sample-album",
+		ArtistID:         "sample-artist",
+		AlbumArtistID:    "sample-album-artist",
+		MbzAlbumArtistID: "6b5959fa-6e66-43c6-b319-1d4c7304df99",
+		MbzAlbumID:       "cc7b11a4-74f5-4571-bfc4-373c6995fd78",
+	})
+	_ = albumRepo.Put(&model.Album{
+		ID:            "sample-album-no-mbz",
+		Artist:        "sample-artist-no-mbz",
+		AlbumArtistID: "sample-album-artist",
+	})
+
+	_ = mfRepo.Put(&model.MediaFile{
+		ID:               "sample-file",
+		ArtistID:         "sample-artist",
+		AlbumID:          "sample-album",
+		AlbumArtistID:    "sample-album-artist",
+		MbzArtistID:      "96a06efa-7f64-4e4f-9dfc-2a834b16e805",
+		MbzAlbumID:       "cc7b11a4-74f5-4571-bfc4-373c6995fd78",
+		MbzAlbumArtistID: "6b5959fa-6e66-43c6-b319-1d4c7304df99",
+	})
+
+	_ = mfRepo.Put(&model.MediaFile{
+		ID:            "sample-file-mo-mbz",
+		ArtistID:      "sample-artist-no-mbz",
+		AlbumID:       "sample-album-no-mbz",
+		AlbumArtistID: "sample-artist-no-mbz",
+	})
+
+	err = migrateArtists(ctx, ds)
+	assert.NoError(t, err)
+
+	_, err = artistRepo.Get("sample-artist")
+	assert.ErrorIs(t, err, model.ErrNotFound)
+
+	_, err = artistRepo.Get("sample-album-artist")
+	assert.ErrorIs(t, err, model.ErrNotFound)
+
+	_, err = artistRepo.Get("sample-artist-no-mbz")
+	assert.NoError(t, err)
+
+	var artist *model.Artist
+	var album *model.Album
+
+	artist, err = artistRepo.Get("96a06efa-7f64-4e4f-9dfc-2a834b16e805")
+	assert.NoError(t, err)
+	assert.Equal(t, &model.Artist{
+		ID:          "96a06efa-7f64-4e4f-9dfc-2a834b16e805",
+		MbzArtistID: "96a06efa-7f64-4e4f-9dfc-2a834b16e805",
+		Annotations: model.Annotations{PlayCount: 2},
+	}, artist)
+
+	artist, err = artistRepo.Get("6b5959fa-6e66-43c6-b319-1d4c7304df99")
+	assert.NoError(t, err)
+	assert.Equal(t, &model.Artist{
+		ID:          "6b5959fa-6e66-43c6-b319-1d4c7304df99",
+		MbzArtistID: "6b5959fa-6e66-43c6-b319-1d4c7304df99",
+		Annotations: model.Annotations{PlayCount: 1},
+	}, artist)
+
+	artist, err = artistRepo.Get("6b5959fa-6e66-43c6-b319-1d4c7304df99")
+	assert.NoError(t, err)
+	assert.Equal(t, &model.Artist{
+		ID:          "6b5959fa-6e66-43c6-b319-1d4c7304df99",
+		MbzArtistID: "6b5959fa-6e66-43c6-b319-1d4c7304df99",
+		Annotations: model.Annotations{PlayCount: 1},
+	}, artist)
+
+	album, err = albumRepo.Get("sample-album")
+	assert.NoError(t, err)
+	assert.Equal(t, &model.Album{
+		ID:               "sample-album",
+		ArtistID:         "96a06efa-7f64-4e4f-9dfc-2a834b16e805",
+		AlbumArtistID:    "6b5959fa-6e66-43c6-b319-1d4c7304df99",
+		MbzAlbumArtistID: "6b5959fa-6e66-43c6-b319-1d4c7304df99",
+		MbzAlbumID:       "cc7b11a4-74f5-4571-bfc4-373c6995fd78",
+	}, album)
 }
 
 func TestAlbumMbzIDMigrations(t *testing.T) {

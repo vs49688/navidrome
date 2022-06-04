@@ -55,10 +55,13 @@ func (m *MockAlbumRepo) Put(al *model.Album) error {
 	if m.err {
 		return errors.New("error")
 	}
-	if al.ID == "" {
-		al.ID = uuid.NewString()
+
+	albumCopy := &model.Album{}
+	*albumCopy = *al
+	if albumCopy.ID == "" {
+		albumCopy.ID = uuid.NewString()
 	}
-	m.data[al.ID] = al
+	m.data[al.ID] = albumCopy
 	return nil
 }
 

@@ -71,10 +71,13 @@ func (m *MockArtistRepo) Put(ar *model.Artist) error {
 	if m.err {
 		return errors.New("error")
 	}
-	if ar.ID == "" {
-		ar.ID = uuid.NewString()
+
+	artistCopy := &model.Artist{}
+	*artistCopy = *ar
+	if artistCopy.ID == "" {
+		artistCopy.ID = uuid.NewString()
 	}
-	m.data[ar.ID] = ar
+	m.data[ar.ID] = artistCopy
 	return nil
 }
 
