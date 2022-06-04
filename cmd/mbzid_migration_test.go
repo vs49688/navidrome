@@ -8,8 +8,10 @@ import (
 	"testing"
 )
 
-// An actual example from my library.
-// Two copies of "The Black Halo", one from Brazil, one from Japan
+// An actual example from my library, simplified.
+// Two copies of "The Black Halo", one from Brazil, one from Japan.
+// Both copies have the same recording as the first track, but different tracks
+// towards the end of the album.
 func createKamelotExample() model.DataStore {
 	ctx := context.Background()
 	ds := tests.MockDataStore{}
@@ -29,6 +31,7 @@ func createKamelotExample() model.DataStore {
 		MbzAlbumID:       "ec77f421-084d-4c0e-9966-257a549823d3",
 		MbzAlbumArtistID: "2449300a-6ca7-45da-8102-22789d256475",
 		AlbumArtistID:    "6194d02002d6ed297500ec7c04ad07d8",
+		AllArtistIDs:     "6194d02002d6ed297500ec7c04ad07d8",
 	}
 
 	_ = ds.Album(ctx).Put(theBlackHalo)
@@ -99,16 +102,23 @@ func createKamelotExample() model.DataStore {
 	return &ds
 }
 
+func TestArtistMbzIDMigrations(t *testing.T) {
+
+}
+
 func TestAlbumMbzIDMigrations(t *testing.T) {
 
 }
 
+func TestMediaFileMbzIDMigrations(t *testing.T) {
+
+}
+
 func TestFullExampleMbzIDMigration(t *testing.T) {
-	ctx := context.Background()
-
-	ds := createKamelotExample()
-
 	var err error
+
+	ctx := context.Background()
+	ds := createKamelotExample()
 
 	err = migrateArtists(ctx, ds)
 	assert.NoError(t, err)
@@ -137,10 +147,11 @@ func TestFullExampleMbzIDMigration(t *testing.T) {
 	assert.Equal(t, &model.Album{
 		ID:               "9b085411-6ab5-30e3-b2a4-8c6049ff8a37",
 		Name:             "The Black Halo",
-		ArtistID:         "6194d02002d6ed297500ec7c04ad07d8",
+		ArtistID:         "2449300a-6ca7-45da-8102-22789d256475",
 		MbzAlbumID:       "9b085411-6ab5-30e3-b2a4-8c6049ff8a37",
 		MbzAlbumArtistID: "2449300a-6ca7-45da-8102-22789d256475",
-		AlbumArtistID:    "6194d02002d6ed297500ec7c04ad07d8",
+		AlbumArtistID:    "2449300a-6ca7-45da-8102-22789d256475",
+		AllArtistIDs:     "2449300a-6ca7-45da-8102-22789d256475",
 	}, brAlbum)
 
 	jpAlbum, err := ds.Album(ctx).Get("ec77f421-084d-4c0e-9966-257a549823d3")
@@ -148,9 +159,81 @@ func TestFullExampleMbzIDMigration(t *testing.T) {
 	assert.Equal(t, &model.Album{
 		ID:               "ec77f421-084d-4c0e-9966-257a549823d3",
 		Name:             "The Black Halo",
-		ArtistID:         "6194d02002d6ed297500ec7c04ad07d8",
+		ArtistID:         "2449300a-6ca7-45da-8102-22789d256475",
 		MbzAlbumID:       "ec77f421-084d-4c0e-9966-257a549823d3",
 		MbzAlbumArtistID: "2449300a-6ca7-45da-8102-22789d256475",
-		AlbumArtistID:    "6194d02002d6ed297500ec7c04ad07d8",
+		AlbumArtistID:    "2449300a-6ca7-45da-8102-22789d256475",
+		AllArtistIDs:     "2449300a-6ca7-45da-8102-22789d256475",
 	}, jpAlbum)
+
+	// Brazil "March of Mephisto"
+	brMarch, err := ds.MediaFile(ctx).Get("9b085411-6ab5-30e3-b2a4-8c6049ff8a37-00fa0f1d-21e1-4611-b0a8-c6ec37cdea1a")
+	assert.NoError(t, err)
+	assert.Equal(t, &model.MediaFile{
+		ID:               "9b085411-6ab5-30e3-b2a4-8c6049ff8a37-00fa0f1d-21e1-4611-b0a8-c6ec37cdea1a",
+		Title:            "March of Mephisto",
+		ArtistID:         "2449300a-6ca7-45da-8102-22789d256475",
+		AlbumID:          "9b085411-6ab5-30e3-b2a4-8c6049ff8a37",
+		AlbumArtistID:    "2449300a-6ca7-45da-8102-22789d256475",
+		MbzTrackID:       "00fa0f1d-21e1-4611-b0a8-c6ec37cdea1a",
+		MbzAlbumID:       "9b085411-6ab5-30e3-b2a4-8c6049ff8a37",
+		MbzArtistID:      "2449300a-6ca7-45da-8102-22789d256475",
+		MbzAlbumArtistID: "2449300a-6ca7-45da-8102-22789d256475",
+		TrackNumber:      1,
+	}, brMarch)
+
+	_, err = ds.MediaFile(ctx).Get("1b28d36bd21837c24d5ad766a21a345d")
+	assert.ErrorIs(t, err, model.ErrNotFound)
+
+	// Brazil "March of Mephisto (radio edit)"
+	brMarchRadio, err := ds.MediaFile(ctx).Get("9b085411-6ab5-30e3-b2a4-8c6049ff8a37-47f01f61-e38e-40e7-9fd7-c21f46f407c7")
+	assert.NoError(t, err)
+	assert.Equal(t, &model.MediaFile{
+		ID:               "9b085411-6ab5-30e3-b2a4-8c6049ff8a37-47f01f61-e38e-40e7-9fd7-c21f46f407c7",
+		Title:            "March of Mephisto (radio edit)",
+		ArtistID:         "2449300a-6ca7-45da-8102-22789d256475",
+		AlbumID:          "9b085411-6ab5-30e3-b2a4-8c6049ff8a37",
+		AlbumArtistID:    "2449300a-6ca7-45da-8102-22789d256475",
+		MbzTrackID:       "47f01f61-e38e-40e7-9fd7-c21f46f407c7",
+		MbzAlbumID:       "9b085411-6ab5-30e3-b2a4-8c6049ff8a37",
+		MbzArtistID:      "2449300a-6ca7-45da-8102-22789d256475",
+		MbzAlbumArtistID: "2449300a-6ca7-45da-8102-22789d256475",
+		TrackNumber:      16,
+	}, brMarchRadio)
+
+	// Japan "March of Mephisto"
+	jpMarch, err := ds.MediaFile(ctx).Get("ec77f421-084d-4c0e-9966-257a549823d3-00fa0f1d-21e1-4611-b0a8-c6ec37cdea1a")
+	assert.NoError(t, err)
+	assert.Equal(t, &model.MediaFile{
+		ID:               "ec77f421-084d-4c0e-9966-257a549823d3-00fa0f1d-21e1-4611-b0a8-c6ec37cdea1a",
+		Title:            "March of Mephisto",
+		ArtistID:         "2449300a-6ca7-45da-8102-22789d256475",
+		AlbumID:          "ec77f421-084d-4c0e-9966-257a549823d3",
+		AlbumArtistID:    "2449300a-6ca7-45da-8102-22789d256475",
+		MbzTrackID:       "00fa0f1d-21e1-4611-b0a8-c6ec37cdea1a",
+		MbzAlbumID:       "ec77f421-084d-4c0e-9966-257a549823d3",
+		MbzArtistID:      "2449300a-6ca7-45da-8102-22789d256475",
+		MbzAlbumArtistID: "2449300a-6ca7-45da-8102-22789d256475",
+		TrackNumber:      1,
+	}, jpMarch)
+
+	_, err = ds.MediaFile(ctx).Get("90fede51aa7c28e53d7ff5a92f0b4976")
+	assert.ErrorIs(t, err, model.ErrNotFound)
+
+	// Japan "Soul Society (radio edit version)"
+	jpSoul, err := ds.MediaFile(ctx).Get("ec77f421-084d-4c0e-9966-257a549823d3-a33f4144-a260-4be9-af21-f695a0f6fce4")
+	assert.NoError(t, err)
+	assert.Equal(t, &model.MediaFile{
+		ID:               "ec77f421-084d-4c0e-9966-257a549823d3-a33f4144-a260-4be9-af21-f695a0f6fce4",
+		Title:            "Soul Society (radio edit version)",
+		ArtistID:         "2449300a-6ca7-45da-8102-22789d256475",
+		AlbumID:          "ec77f421-084d-4c0e-9966-257a549823d3",
+		AlbumArtistID:    "2449300a-6ca7-45da-8102-22789d256475",
+		MbzTrackID:       "a33f4144-a260-4be9-af21-f695a0f6fce4",
+		MbzAlbumID:       "ec77f421-084d-4c0e-9966-257a549823d3",
+		MbzArtistID:      "2449300a-6ca7-45da-8102-22789d256475",
+		MbzAlbumArtistID: "2449300a-6ca7-45da-8102-22789d256475",
+		TrackNumber:      16,
+	}, jpSoul)
+
 }
