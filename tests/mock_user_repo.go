@@ -56,3 +56,18 @@ func (u *MockedUserRepo) FindByUsernameWithPassword(username string) (*model.Use
 func (u *MockedUserRepo) UpdateLastLoginAt(id string) error {
 	return u.Error
 }
+
+func (u *MockedUserRepo) GetAll(options ...model.QueryOptions) (model.Users, error) {
+	// TODO: handle options
+
+	if u.Error != nil {
+		return nil, u.Error
+	}
+
+	res := make([]model.User, 0, len(u.Data))
+	for _, a := range u.Data {
+		res = append(res, *a)
+	}
+
+	return res, nil
+}

@@ -18,7 +18,6 @@ func CreateMockAlbumRepo() *MockAlbumRepo {
 type MockAlbumRepo struct {
 	model.AlbumRepository
 	data    map[string]*model.Album
-	all     model.Albums
 	err     bool
 	Options model.QueryOptions
 }
@@ -29,9 +28,8 @@ func (m *MockAlbumRepo) SetError(err bool) {
 
 func (m *MockAlbumRepo) SetData(albums model.Albums) {
 	m.data = make(map[string]*model.Album)
-	m.all = albums
-	for i, a := range m.all {
-		m.data[a.ID] = &m.all[i]
+	for i, a := range albums {
+		m.data[a.ID] = &albums[i]
 	}
 }
 
@@ -71,7 +69,12 @@ func (m *MockAlbumRepo) GetAll(qo ...model.QueryOptions) (model.Albums, error) {
 	if m.err {
 		return nil, errors.New("Error!")
 	}
-	return m.all, nil
+
+	res := make(model.Albums, 0, len(m.data))
+	for _, a := range m.data {
+		res = append(res, *a)
+	}
+	return res, nil
 }
 
 func (m *MockAlbumRepo) GetAllWithoutGenres(qo ...model.QueryOptions) (model.Albums, error) {
@@ -90,7 +93,14 @@ func (m *MockAlbumRepo) IncPlayCount(id string, timestamp time.Time) error {
 	return model.ErrNotFound
 }
 func (m *MockAlbumRepo) CountAll(...model.QueryOptions) (int64, error) {
-	return int64(len(m.all)), nil
+	return int64(len(m.data)), nil
+}
+
+func (m *MockAlbumRepo) DeleteMany(ids ...string) error {
+	for _, id := range ids {
+		delete(m.data, id)
+	}
+	return nil
 }
 
 var _ model.AlbumRepository = (*MockAlbumRepo)(nil)

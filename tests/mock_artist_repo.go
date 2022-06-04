@@ -11,14 +11,16 @@ import (
 
 func CreateMockArtistRepo() *MockArtistRepo {
 	return &MockArtistRepo{
-		data: make(map[string]*model.Artist),
+		data:        make(map[string]*model.Artist),
+		annotations: make(map[string]*model.Annotations),
 	}
 }
 
 type MockArtistRepo struct {
 	model.ArtistRepository
-	data map[string]*model.Artist
-	err  bool
+	data        map[string]*model.Artist
+	annotations map[string]*model.Annotations
+	err         bool
 }
 
 func (m *MockArtistRepo) SetError(err bool) {
@@ -50,6 +52,21 @@ func (m *MockArtistRepo) Get(id string) (*model.Artist, error) {
 	return nil, model.ErrNotFound
 }
 
+func (m *MockArtistRepo) GetAll(options ...model.QueryOptions) (model.Artists, error) {
+	// TODO: handle options
+
+	if m.err {
+		return nil, errors.New("Error!")
+	}
+
+	res := make([]model.Artist, 0, len(m.data))
+	for _, a := range m.data {
+		res = append(res, *a)
+	}
+
+	return res, nil
+}
+
 func (m *MockArtistRepo) Put(ar *model.Artist) error {
 	if m.err {
 		return errors.New("error")
@@ -71,6 +88,23 @@ func (m *MockArtistRepo) IncPlayCount(id string, timestamp time.Time) error {
 		return nil
 	}
 	return model.ErrNotFound
+}
+
+func (m *MockArtistRepo) DeleteMany(ids ...string) error {
+	for _, id := range ids {
+		delete(m.data, id)
+	}
+	return nil
+}
+
+func (m *MockArtistRepo) MoveAnnotation(fromID string, toID string) error {
+	from, found := m.annotations[fromID]
+	if !found {
+		return nil
+	}
+
+	m.annotations[toID] = from
+	return nil
 }
 
 var _ model.ArtistRepository = (*MockArtistRepo)(nil)

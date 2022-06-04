@@ -11,14 +11,16 @@ import (
 
 func CreateMockMediaFileRepo() *MockMediaFileRepo {
 	return &MockMediaFileRepo{
-		data: make(map[string]*model.MediaFile),
+		data:        make(map[string]*model.MediaFile),
+		annotations: make(map[string]*model.Annotations),
 	}
 }
 
 type MockMediaFileRepo struct {
 	model.MediaFileRepository
-	data map[string]*model.MediaFile
-	err  bool
+	data        map[string]*model.MediaFile
+	annotations map[string]*model.Annotations
+	err         bool
 }
 
 func (m *MockMediaFileRepo) SetError(err bool) {
@@ -48,6 +50,21 @@ func (m *MockMediaFileRepo) Get(id string) (*model.MediaFile, error) {
 		return d, nil
 	}
 	return nil, model.ErrNotFound
+}
+
+func (m *MockMediaFileRepo) GetAll(options ...model.QueryOptions) (model.MediaFiles, error) {
+	// TODO: handle options
+
+	if m.err {
+		return nil, errors.New("Error!")
+	}
+
+	res := make([]model.MediaFile, 0, len(m.data))
+	for _, mf := range m.data {
+		res = append(res, *mf)
+	}
+
+	return res, nil
 }
 
 func (m *MockMediaFileRepo) Put(mf *model.MediaFile) error {
@@ -87,6 +104,23 @@ func (m *MockMediaFileRepo) FindByAlbum(artistId string) (model.MediaFiles, erro
 	}
 
 	return res, nil
+}
+
+func (m *MockMediaFileRepo) DeleteMany(ids ...string) error {
+	for _, id := range ids {
+		delete(m.data, id)
+	}
+	return nil
+}
+
+func (m *MockMediaFileRepo) MoveAnnotation(fromID string, toID string) error {
+	from, found := m.annotations[fromID]
+	if !found {
+		return nil
+	}
+
+	m.annotations[toID] = from
+	return nil
 }
 
 var _ model.MediaFileRepository = (*MockMediaFileRepo)(nil)
