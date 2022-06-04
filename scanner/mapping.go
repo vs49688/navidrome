@@ -135,6 +135,10 @@ func (s mediaFileMapper) mapMbzID(id string) string {
 }
 
 func (s mediaFileMapper) trackID(md metadata.Tags) string {
+	if id := s.mapMbzID(md.MbzTrackID()); id != "" {
+		return id
+	}
+
 	return fmt.Sprintf("%x", md5.Sum([]byte(md.FilePath())))
 }
 
