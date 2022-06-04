@@ -333,6 +333,217 @@ func migrateMediaFiles(ctx context.Context, ds model.DataStore) error {
 	})
 }
 
+type deleteManyable interface {
+	DeleteMany(ids ...string) error
+}
+
+func deleteManyIDs(repo deleteManyable, ids map[string]bool) error {
+	s := make([]string, 0, len(ids))
+	for id := range ids {
+		s = append(s, id)
+	}
+
+	return utils.RangeByChunks(s, 100, func(s []string) error {
+		return repo.DeleteMany(s...)
+	})
+}
+
+func migrateUserPlaylists(ctx context.Context, ds model.DataStore, user model.User, ndIdToMbzId map[string]string) error {
+	var err error
+
+	repo := ds.Playlist(request.WithUser(ctx, user))
+	playlists, err := repo.GetAll()
+	if err != nil {
+		return err
+	}
+
+	for _, playlist := range playlists {
+		newPlaylist, err2 := repo.GetWithTracks(playlist.ID)
+		if err2 != nil {
+			return err2
+		}
+
+		for i := range newPlaylist.Tracks {
+			newPlaylist.Tracks[i].MediaFileID = ndIdToMbzId[newPlaylist.Tracks[i].MediaFileID]
+			newPlaylist.Tracks[i].MediaFile.ID = newPlaylist.Tracks[i].MediaFileID
+		}
+
+		if err2 = repo.Put(newPlaylist); err2 != nil {
+			return err2
+		}
+	}
+	return nil
+}
+
+func migrateUserPlayQueue(ctx context.Context, ds model.DataStore, user model.User, ndIdToMbzId map[string]string) error {
+	repo := ds.PlayQueue(request.WithUser(ctx, user))
+	playQueue, err := repo.Retrieve(user.ID)
+	if err != nil {
+		if errors.Is(err, model.ErrNotFound) {
+			return nil
+		}
+
+		return err
+	}
+
+	playQueue.Current = ndIdToMbzId[playQueue.Current]
+
+	for i := range playQueue.Items {
+		playQueue.Items[i].ID = xxx[playQueue.Items[i].ID]
+	}
+
+	return repo.Store(playQueue)
+}
+
+// Migrate all the database entities to use MusicBrainz IDs.
+// Uses the Mbz* fields in model.MediaFile to define the relationships, ignoring
+// the Navidrome ones.
+func migrateEverything(ctx context.Context, ds model.DataStore) error {
+	artistRepo := ds.Artist(ctx)
+	albumRepo := ds.Album(ctx)
+	mfRepo := ds.MediaFile(ctx)
+	userRepo := ds.User(ctx)
+
+	log.Info("Pass 1: Rebuild hierarchy")
+
+	mediaFiles, err := mfRepo.GetAll()
+	if err != nil {
+		return err
+	}
+
+	mediaFileIdMap := make(map[string]*model.MediaFile, len(mediaFiles))
+	newMediaFiles := make(map[string]*model.MediaFile, len(mediaFiles))
+	newArtists := make(map[string]*model.Artist)
+	newAlbums := make(map[string]*model.Album)
+
+	oldMediaFiles := map[string]bool{}
+	oldArtists := map[string]bool{}
+	oldAlbums := map[string]bool{}
+
+	for i, mf := range mediaFiles {
+		mediaFileIdMap[mf.ID] = &mediaFiles[i]
+
+		// Don't touch partial files. The final rescan should take care of them.
+		if mf.MbzTrackID == "" || mf.MbzAlbumID == "" || mf.MbzArtistID == "" || mf.MbzAlbumArtistID == "" {
+			continue
+		}
+
+		oldMediaFiles[mf.ID] = true
+		oldArtists[mf.ArtistID] = true
+		oldArtists[mf.AlbumArtistID] = true
+		oldAlbums[mf.AlbumID] = true
+
+		if newMediaFile, ok := newMediaFiles[mf.MbzTrackID]; !ok {
+			newMediaFile = &model.MediaFile{}
+			*newMediaFile = mf
+
+			newMediaFile.ID = mf.MbzTrackID
+			newMediaFile.AlbumID = mf.MbzAlbumID
+			newMediaFile.ArtistID = mf.MbzArtistID
+			newMediaFile.AlbumArtistID = mf.MbzAlbumArtistID
+			newMediaFiles[mf.MbzTrackID] = newMediaFile
+		}
+
+		if _, ok := newArtists[mf.MbzArtistID]; !ok {
+			newArtists[mf.MbzArtistID] = &model.Artist{ID: mf.MbzArtistID, MbzArtistID: mf.MbzArtistID}
+		}
+
+		if _, ok := newArtists[mf.MbzAlbumArtistID]; !ok {
+			newArtists[mf.MbzAlbumArtistID] = &model.Artist{ID: mf.MbzAlbumArtistID, MbzArtistID: mf.MbzAlbumArtistID}
+		}
+
+		if _, ok := newAlbums[mf.MbzAlbumID]; !ok {
+			newAlbums[mf.MbzAlbumID] = &model.Album{
+				ID:               mf.MbzAlbumID,
+				AlbumArtistID:    mf.MbzAlbumArtistID,
+				MbzAlbumID:       mf.MbzAlbumID,
+				MbzAlbumArtistID: mf.MbzAlbumArtistID,
+			}
+		}
+
+	}
+
+	artists, err := artistRepo.GetAll()
+	if err != nil {
+		return err
+	}
+
+	for _, artist := range artists {
+		if newArtist, ok := newArtists[artist.MbzArtistID]; ok {
+			tmp := *newArtist
+			*newArtist = artist
+			newArtist.ID = tmp.ID
+			newArtist.MbzArtistID = tmp.MbzArtistID
+		}
+
+		oldArtists[artist.ID] = true
+	}
+
+	albums, err := albumRepo.GetAll()
+	if err != nil {
+		return err
+	}
+
+	for _, album := range albums {
+		if newAlbum, ok := newAlbums[album.MbzAlbumID]; ok {
+			tmp := *newAlbum
+			*newAlbum = album
+			newAlbum.ID = tmp.ID
+			newAlbum.AlbumArtistID = tmp.AlbumArtistID
+			newAlbum.MbzAlbumID = tmp.MbzAlbumID
+			newAlbum.MbzAlbumArtistID = tmp.MbzAlbumArtistID
+		}
+
+		oldAlbums[album.ID] = true
+	}
+
+	log.Info("Pass 2: Add new artists")
+	// TODO: add new artists
+
+	log.Info("Pass 3: Add new albums")
+	// TODO: add new albums
+
+	log.Info("Pass 4: Add new tracks")
+	// TODO: add new mediafiles
+
+	// Playlists and Play queues require a user in the context
+	users, err := userRepo.GetAll()
+	if err != nil {
+		return err
+	}
+
+	log.Info("Pass 5: Update playlist references")
+	for _, user := range users {
+		if err = migrateUserPlaylists(ctx, ds, user, nil); err != nil {
+			return err
+		}
+	}
+
+	log.Info("Pass 6: Update play queue references")
+	for _, user := range users {
+		if err = migrateUserPlayQueue(ctx, ds, user, nil); err != nil {
+			return err
+		}
+	}
+
+	log.Info("Pass 7: Cleanup leftover tracks")
+	if err = deleteManyIDs(mfRepo, oldMediaFiles); err != nil {
+		return err
+	}
+
+	log.Info("Pass 8: Cleanup leftover albums")
+	if err = deleteManyIDs(albumRepo, oldAlbums); err != nil {
+		return err
+	}
+
+	log.Info("Pass 9: Cleanup leftover artists")
+	if err = deleteManyIDs(artistRepo, oldArtists); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func convertToMbzIDs(ctx context.Context) error {
 	var err error
 
@@ -358,15 +569,19 @@ func convertToMbzIDs(ctx context.Context) error {
 			return errors.New("user aborted")
 		}
 
-		log.Info("Migrating artists...")
-		if err := migrateArtists(ctx, tx); err != nil {
+		if err := migrateEverything(ctx, tx); err != nil {
 			return err
 		}
 
-		log.Info("Migrating albums...")
-		if err := migrateAlbums(ctx, tx); err != nil {
-			return err
-		}
+		//log.Info("Migrating artists...")
+		//if err := migrateArtists(ctx, tx); err != nil {
+		//	return err
+		//}
+		//
+		//log.Info("Migrating albums...")
+		//if err := migrateAlbums(ctx, tx); err != nil {
+		//	return err
+		//}
 
 		//log.Info("Migrating tracks...")
 		//if err = migrateMediaFiles(ctx, tx); err != nil {
