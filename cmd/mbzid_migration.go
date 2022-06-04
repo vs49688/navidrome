@@ -153,50 +153,67 @@ func migrateArtists(ctx context.Context, ds model.DataStore) error {
 }
 
 func migrateAlbums(ctx context.Context, ds model.DataStore) error {
-	log.Info("Pass 1: Create new albums with MusicBrainz IDs")
-
 	albumRepo := ds.Album(ctx)
 	albums, err := albumRepo.GetAll()
 	if err != nil {
 		return err
 	}
 
-	mbmap := make(mbidMap, len(albums))
-	toRemove := make([]string, 0, len(albums))
-
-	for _, a := range albums {
-		if a.MbzAlbumID == "" {
-			continue
-		}
-
-		if _, err := uuid.Parse(a.MbzAlbumID); err != nil {
-			log.Warn(fmt.Sprintf("Ignoring invalid album MBID %s", a.MbzAlbumID))
-			continue
-		}
-
-		toRemove = append(toRemove, a.ID)
-		mbmap[a.ID] = append(mbmap[a.ID], a.MbzAlbumID)
-
-		oldID := a.ID
-		a.ID = a.MbzAlbumID
-		if err := albumRepo.Put(&a); err != nil {
-			return err
-		}
-
-		if err := albumRepo.MoveAnnotation(oldID, a.ID); err != nil {
-			return err
-		}
-	}
-
-	log.Info("Pass 2: Update track album references")
 	mfRepo := ds.MediaFile(ctx)
 	mediaFiles, err := mfRepo.GetAll()
 	if err != nil {
 		return err
 	}
 
+	log.Info("Pass 1: Build album/track indexes")
+	mediaFileIdMap := make(map[string]*model.MediaFile, len(mediaFiles))
+	albumIdMap := make(map[string]model.Album, len(albums))
+	mbToNdAlbum := make(map[string]*model.Album, len(albums))
+	toRemove := make([]string, 0, len(albums))
+
+	for _, a := range albums {
+		albumIdMap[a.ID] = a
+		toRemove = append(toRemove, a.ID)
+	}
+
 	for _, mf := range mediaFiles {
-		mf.AlbumID = mbmap.maybeGet(mf.AlbumID, 0)
+		mediaFileIdMap[mf.ID] = &mf
+
+		if mf.MbzAlbumID == "" {
+			continue
+		}
+
+		if _, err := uuid.Parse(mf.MbzAlbumID); err != nil {
+			log.Warn(fmt.Sprintf("Ignoring invalid track album MBID %s", mf.MbzAlbumID))
+			continue
+		}
+
+		// Copy the existing album and update its IDs
+		newAlbum := &model.Album{}
+		*newAlbum = albumIdMap[mf.AlbumID]
+		newAlbum.ID = mf.MbzAlbumID
+		newAlbum.MbzAlbumID = mf.MbzAlbumID
+
+		mbToNdAlbum[mf.MbzAlbumID] = newAlbum
+	}
+
+	log.Info("Pass 2: Create new albums with MusicBrainz IDs")
+	for _, newAlbum := range mbToNdAlbum {
+		if err := albumRepo.Put(newAlbum); err != nil {
+			return err
+		}
+
+		// TODO: copy annotation
+	}
+
+	log.Info("Pass 3: Update track album references")
+
+	for _, mf := range mediaFiles {
+		if mf.MbzAlbumID == "" {
+			continue // Have already reported this above
+		}
+
+		mf.AlbumID = mf.MbzAlbumID
 		if err := mfRepo.Put(&mf); err != nil {
 			return err
 		}
@@ -221,7 +238,7 @@ func migrateMediaFiles(ctx context.Context, ds model.DataStore) error {
 	toRemove := make([]string, 0, len(mediaFiles))
 
 	for _, mf := range mediaFiles {
-		if mf.MbzTrackID == "" {
+		if mf.MbzTrackID == "" || mf.MbzAlbumID == "" {
 			continue
 		}
 
@@ -230,11 +247,22 @@ func migrateMediaFiles(ctx context.Context, ds model.DataStore) error {
 			continue
 		}
 
+		if _, err := uuid.Parse(mf.MbzAlbumID); err != nil {
+			log.Warn(fmt.Sprintf("Ignoring invalid album MBID %s", mf.MbzAlbumID))
+			continue
+		}
+
 		toRemove = append(toRemove, mf.ID)
-		mbmap[mf.ID] = append(mbmap[mf.ID], mf.MbzTrackID)
+		// The same track can belong to multiple albums, so munge a key based on (album, track) ids
+		newID := fmt.Sprintf("%v-%v", mf.MbzAlbumID, mf.MbzTrackID)
+		mbmap[mf.ID] = append(mbmap[mf.ID], newID)
+
+		if len(mbmap[mf.ID]) > 1 {
+			fmt.Println("xxx")
+		}
 
 		oldID := mf.ID
-		mf.ID = mf.MbzTrackID
+		mf.ID = newID
 		if err := mfRepo.Put(&mf); err != nil {
 			return err
 		}
@@ -340,10 +368,10 @@ func convertToMbzIDs(ctx context.Context) error {
 			return err
 		}
 
-		log.Info("Migrating tracks...")
-		if err = migrateMediaFiles(ctx, tx); err != nil {
-			return err
-		}
+		//log.Info("Migrating tracks...")
+		//if err = migrateMediaFiles(ctx, tx); err != nil {
+		//	return err
+		//}
 
 		if err = props.Put(model.PropUsingMbzIDs, "true"); err != nil {
 			return err
