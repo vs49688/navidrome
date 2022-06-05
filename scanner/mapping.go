@@ -135,8 +135,12 @@ func (s mediaFileMapper) mapMbzID(id string) string {
 }
 
 func (s mediaFileMapper) trackID(md metadata.Tags) string {
-	if id := s.mapMbzID(md.MbzTrackID()); id != "" {
-		return id
+	// The same track can belong to multiple albums so
+	// use both the track and album IDs to make a key
+	mbzTrackId := s.mapMbzID(md.MbzTrackID())
+	mbzAlbumId := s.mapMbzID(md.MbzAlbumID())
+	if mbzTrackId != "" && mbzAlbumId != "" {
+		return fmt.Sprintf("%v-%v", mbzAlbumId, mbzTrackId)
 	}
 
 	return fmt.Sprintf("%x", md5.Sum([]byte(md.FilePath())))
