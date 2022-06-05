@@ -142,15 +142,18 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 		return err
 	}
 
-	oldToNewMF := make(map[string]*model.MediaFile, len(mediaFiles))
-
 	newMediaFiles := make(map[string]*model.MediaFile, len(mediaFiles))
-	newArtists := make(map[string]*model.Artist)
-	newAlbums := make(map[string]*model.Album)
+	newArtists := map[string]*model.Artist{}
+	newAlbums := map[string]*model.Album{}
 
-	oldMediaFiles := map[string]bool{}
+	oldMediaFiles := make(map[string]bool, len(mediaFiles))
 	oldArtists := map[string]bool{}
 	oldAlbums := map[string]bool{}
+
+	oldToNewMF := make(map[string]*model.MediaFile, len(mediaFiles)) // For play queue/playlist remapping
+	newToOldMF := make(map[string]string, len(mediaFiles))           // For mediafile annotations
+	newToOldAlbum := map[string]string{}                             // For album annotations
+	newToOldArtist := map[string]string{}                            // For artist annotations
 
 	for _, mf := range mediaFiles {
 		// Don't touch partial files. The final rescan should take care of them.
@@ -176,14 +179,17 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 			newMediaFiles[newID] = newMediaFile
 
 			oldToNewMF[mf.ID] = newMediaFile
+			newToOldMF[newID] = mf.ID
 		}
 
 		if _, ok := newArtists[mf.MbzArtistID]; !ok {
 			newArtists[mf.MbzArtistID] = &model.Artist{ID: mf.MbzArtistID, MbzArtistID: mf.MbzArtistID}
+			newToOldArtist[mf.MbzArtistID] = mf.ArtistID
 		}
 
 		if _, ok := newArtists[mf.MbzAlbumArtistID]; !ok {
 			newArtists[mf.MbzAlbumArtistID] = &model.Artist{ID: mf.MbzAlbumArtistID, MbzArtistID: mf.MbzAlbumArtistID}
+			newToOldArtist[mf.MbzAlbumArtistID] = mf.AlbumArtistID
 		}
 
 		if _, ok := newAlbums[mf.MbzAlbumID]; !ok {
@@ -194,6 +200,7 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 				MbzAlbumID:       mf.MbzAlbumID,
 				MbzAlbumArtistID: mf.MbzAlbumArtistID,
 			}
+			newToOldAlbum[mf.MbzAlbumID] = mf.AlbumID
 		}
 
 	}
@@ -232,23 +239,35 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 		}
 	}
 
-	log.Info("Pass 2: Add new artists")
+	log.Info("Pass 2: Add new artists", "count", len(newArtists))
 	for _, artist := range newArtists {
 		if err = artistRepo.Put(artist); err != nil {
 			return err
 		}
-	}
 
-	log.Info("Pass 3: Add new albums")
-	for _, album := range newAlbums {
-		if err = albumRepo.Put(album); err != nil {
+		if err = artistRepo.CopyAnnotation(newToOldArtist[artist.ID], artist.ID); err != nil {
 			return err
 		}
 	}
 
-	log.Info("Pass 4: Add new tracks")
+	log.Info("Pass 3: Add new albums", "count", len(newAlbums))
+	for _, album := range newAlbums {
+		if err = albumRepo.Put(album); err != nil {
+			return err
+		}
+
+		if err = albumRepo.CopyAnnotation(newToOldAlbum[album.ID], album.ID); err != nil {
+			return err
+		}
+	}
+
+	log.Info("Pass 4: Add new tracks", "count", len(newMediaFiles))
 	for _, mf := range newMediaFiles {
 		if err = mfRepo.Put(mf); err != nil {
+			return err
+		}
+
+		if err = mfRepo.CopyAnnotation(newToOldMF[mf.ID], mf.ID); err != nil {
 			return err
 		}
 	}
@@ -266,24 +285,24 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 		}
 	}
 
-	log.Info("Pass 6: Update play queue references")
+	log.Info("Pass 6: Update play queue references", "count", len(users))
 	for _, user := range users {
 		if err = migrateUserPlayQueue(ctx, ds, user, oldToNewMF); err != nil {
 			return err
 		}
 	}
 
-	log.Info("Pass 7: Cleanup leftover tracks")
+	log.Info("Pass 7: Cleanup leftover tracks", "count", len(oldMediaFiles))
 	if err = deleteManyIDs(mfRepo, oldMediaFiles); err != nil {
 		return err
 	}
 
-	log.Info("Pass 8: Cleanup leftover albums")
+	log.Info("Pass 8: Cleanup leftover albums", "count", len(oldAlbums))
 	if err = deleteManyIDs(albumRepo, oldAlbums); err != nil {
 		return err
 	}
 
-	log.Info("Pass 9: Cleanup leftover artists")
+	log.Info("Pass 9: Cleanup leftover artists", "count", len(oldArtists))
 	if err = deleteManyIDs(artistRepo, oldArtists); err != nil {
 		return err
 	}
