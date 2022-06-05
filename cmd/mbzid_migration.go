@@ -161,11 +161,6 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 			continue
 		}
 
-		oldMediaFiles[mf.ID] = true
-		oldArtists[mf.ArtistID] = true
-		oldArtists[mf.AlbumArtistID] = true
-		oldAlbums[mf.AlbumID] = true
-
 		newID := fmt.Sprintf("%v-%v", mf.MbzAlbumID, mf.MbzTrackID)
 
 		if newMediaFile, ok := newMediaFiles[newID]; !ok {
@@ -180,16 +175,19 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 
 			oldToNewMF[mf.ID] = newMediaFile
 			newToOldMF[newID] = mf.ID
+			oldMediaFiles[mf.ID] = true
 		}
 
 		if _, ok := newArtists[mf.MbzArtistID]; !ok {
 			newArtists[mf.MbzArtistID] = &model.Artist{ID: mf.MbzArtistID, MbzArtistID: mf.MbzArtistID}
 			newToOldArtist[mf.MbzArtistID] = mf.ArtistID
+			oldArtists[mf.ArtistID] = true
 		}
 
 		if _, ok := newArtists[mf.MbzAlbumArtistID]; !ok {
 			newArtists[mf.MbzAlbumArtistID] = &model.Artist{ID: mf.MbzAlbumArtistID, MbzArtistID: mf.MbzAlbumArtistID}
 			newToOldArtist[mf.MbzAlbumArtistID] = mf.AlbumArtistID
+			oldArtists[mf.AlbumArtistID] = true
 		}
 
 		if _, ok := newAlbums[mf.MbzAlbumID]; !ok {
@@ -201,6 +199,7 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 				MbzAlbumArtistID: mf.MbzAlbumArtistID,
 			}
 			newToOldAlbum[mf.MbzAlbumID] = mf.AlbumID
+			oldAlbums[mf.AlbumID] = true
 		}
 
 	}
