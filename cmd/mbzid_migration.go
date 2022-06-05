@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/navidrome/navidrome/db"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
@@ -37,7 +35,8 @@ var mbzIdCmd = &cobra.Command{
 }
 
 func init() {
-	mbzIdCmd.Flags().BoolVar(&mbzidNoScan, "no-scan", false, "don't re-scan afterwards")
+	mbzIdCmd.Flags().BoolVar(&mbzidNoScan, "no-scan", false, `don't re-scan afterwards.
+WARNING: Your database will be in an inconsistent state unless a full-rescan is completed.`)
 	mbzIdCmd.Flags().BoolVar(&mbzidNoConfirm, "no-confirm", false, "don't ask for confirmation")
 	rootCmd.AddCommand(mbzIdCmd)
 }
@@ -59,280 +58,6 @@ func warnMbzMigration(dur time.Duration) bool {
 	}
 }
 
-type mbidMap map[string][]string
-
-func (m mbidMap) maybeGet(s string, idx uint) string {
-	if val, ok := m[s]; ok {
-		return val[idx]
-	}
-
-	return s
-}
-
-func migrateArtists(ctx context.Context, ds model.DataStore) error {
-	log.Info("Pass 1: Create new artists using MusicBrainz IDs")
-
-	artistRepo := ds.Artist(ctx)
-
-	artists, err := artistRepo.GetAll()
-	if err != nil {
-		return err
-	}
-
-	mbmap := make(mbidMap, len(artists))
-	toRemove := make([]string, 0, len(artists))
-
-	for _, a := range artists {
-		if a.MbzArtistID == "" {
-			continue
-		}
-
-		if _, err := uuid.Parse(a.MbzArtistID); err != nil {
-			log.Warn(fmt.Sprintf("Ignoring invalid artist MBID %s", a.MbzArtistID))
-			continue
-		}
-
-		toRemove = append(toRemove, a.ID)
-		mbmap[a.ID] = append(mbmap[a.ID], a.MbzArtistID)
-
-		oldID := a.ID
-		a.ID = a.MbzArtistID
-		if err = artistRepo.Put(&a); err != nil {
-			return err
-		}
-
-		if err = artistRepo.MoveAnnotation(oldID, a.ID); err != nil {
-			return err
-		}
-	}
-
-	log.Info("Pass 2: Update album artist references")
-	albumRepo := ds.Album(ctx)
-	albums, err := albumRepo.GetAll()
-	if err != nil {
-		return err
-	}
-
-	for _, album := range albums {
-		album.ArtistID = mbmap.maybeGet(album.ArtistID, 0)
-		album.AlbumArtistID = mbmap.maybeGet(album.AlbumArtistID, 0)
-
-		allArtistIDs := strings.Split(album.AllArtistIDs, " ")
-		newArtists := make([]string, 0, len(allArtistIDs))
-
-		for _, a := range allArtistIDs {
-			newArtists = append(newArtists, strings.TrimSpace(mbmap.maybeGet(a, 0)))
-		}
-		album.AllArtistIDs = utils.SanitizeStrings(newArtists...)
-
-		if err = albumRepo.Put(&album); err != nil {
-			return err
-		}
-	}
-
-	log.Info("Pass 3: Update track artist references")
-	mfRepo := ds.MediaFile(ctx)
-	mediaFiles, err := mfRepo.GetAll()
-	if err != nil {
-		return err
-	}
-
-	for _, mf := range mediaFiles {
-		mf.ArtistID = mbmap.maybeGet(mf.ArtistID, 0)
-		mf.AlbumArtistID = mbmap.maybeGet(mf.AlbumArtistID, 0)
-
-		if err = mfRepo.Put(&mf); err != nil {
-			return err
-		}
-	}
-
-	log.Info(fmt.Sprintf("Pass 4: Cleanup %v leftover artists", len(toRemove)))
-	return utils.RangeByChunks(toRemove, 100, func(s []string) error {
-		return artistRepo.DeleteMany(s...)
-	})
-}
-
-func migrateAlbums(ctx context.Context, ds model.DataStore) error {
-	albumRepo := ds.Album(ctx)
-	albums, err := albumRepo.GetAll()
-	if err != nil {
-		return err
-	}
-
-	mfRepo := ds.MediaFile(ctx)
-	mediaFiles, err := mfRepo.GetAll()
-	if err != nil {
-		return err
-	}
-
-	log.Info("Pass 1: Build album/track indexes")
-	mediaFileIdMap := make(map[string]*model.MediaFile, len(mediaFiles))
-	albumIdMap := make(map[string]model.Album, len(albums))
-	mbToNdAlbum := make(map[string]*model.Album, len(albums))
-	toRemove := make([]string, 0, len(albums))
-
-	for _, a := range albums {
-		albumIdMap[a.ID] = a
-		toRemove = append(toRemove, a.ID)
-	}
-
-	for _, mf := range mediaFiles {
-		mediaFileIdMap[mf.ID] = &mf
-
-		if mf.MbzAlbumID == "" {
-			continue
-		}
-
-		if _, err := uuid.Parse(mf.MbzAlbumID); err != nil {
-			log.Warn(fmt.Sprintf("Ignoring invalid track album MBID %s", mf.MbzAlbumID))
-			continue
-		}
-
-		// Copy the existing album and update its IDs
-		newAlbum := &model.Album{}
-		*newAlbum = albumIdMap[mf.AlbumID]
-		newAlbum.ID = mf.MbzAlbumID
-		newAlbum.MbzAlbumID = mf.MbzAlbumID
-
-		mbToNdAlbum[mf.MbzAlbumID] = newAlbum
-	}
-
-	log.Info("Pass 2: Create new albums with MusicBrainz IDs")
-	for _, newAlbum := range mbToNdAlbum {
-		if err := albumRepo.Put(newAlbum); err != nil {
-			return err
-		}
-
-		// TODO: copy annotation
-	}
-
-	log.Info("Pass 3: Update track album references")
-
-	for _, mf := range mediaFiles {
-		if mf.MbzAlbumID == "" {
-			continue // Have already reported this above
-		}
-
-		mf.AlbumID = mf.MbzAlbumID
-		if err := mfRepo.Put(&mf); err != nil {
-			return err
-		}
-	}
-
-	log.Info(fmt.Sprintf("Pass 3: Cleanup %v leftover albums", len(toRemove)))
-	return utils.RangeByChunks(toRemove, 100, func(s []string) error {
-		return albumRepo.DeleteMany(s...)
-	})
-}
-
-func migrateMediaFiles(ctx context.Context, ds model.DataStore) error {
-	log.Info("Pass 1: Create new tracks using MusicBrainz IDs")
-
-	mfRepo := ds.MediaFile(ctx)
-	mediaFiles, err := mfRepo.GetAll()
-	if err != nil {
-		return err
-	}
-
-	mbmap := make(mbidMap, len(mediaFiles))
-	toRemove := make([]string, 0, len(mediaFiles))
-
-	for _, mf := range mediaFiles {
-		if mf.MbzTrackID == "" || mf.MbzAlbumID == "" {
-			continue
-		}
-
-		if _, err := uuid.Parse(mf.MbzTrackID); err != nil {
-			log.Warn(fmt.Sprintf("Ignoring invalid track MBID %s", mf.MbzTrackID))
-			continue
-		}
-
-		if _, err := uuid.Parse(mf.MbzAlbumID); err != nil {
-			log.Warn(fmt.Sprintf("Ignoring invalid album MBID %s", mf.MbzAlbumID))
-			continue
-		}
-
-		toRemove = append(toRemove, mf.ID)
-		// The same track can belong to multiple albums, so munge a key based on (album, track) ids
-		newID := fmt.Sprintf("%v-%v", mf.MbzAlbumID, mf.MbzTrackID)
-		mbmap[mf.ID] = append(mbmap[mf.ID], newID)
-
-		if len(mbmap[mf.ID]) > 1 {
-			fmt.Println("xxx")
-		}
-
-		oldID := mf.ID
-		mf.ID = newID
-		if err := mfRepo.Put(&mf); err != nil {
-			return err
-		}
-
-		if err := mfRepo.MoveAnnotation(oldID, mf.ID); err != nil {
-			return err
-		}
-	}
-
-	// Playlists and Play queues require a user in the context
-	userRepo := ds.User(ctx)
-	users, err := userRepo.GetAll()
-	if err != nil {
-		return err
-	}
-
-	log.Info("Pass 2: Update playlist track references")
-	for _, user := range users {
-		playlistRepo := ds.Playlist(request.WithUser(ctx, user))
-		playlists, err := playlistRepo.GetAll()
-		if err != nil {
-			return err
-		}
-
-		for _, playlist := range playlists {
-			pl, err := playlistRepo.GetWithTracks(playlist.ID)
-			if err != nil {
-				return err
-			}
-
-			for i := range pl.Tracks {
-				pl.Tracks[i].MediaFileID = mbmap.maybeGet(pl.Tracks[i].MediaFileID, 0)
-				pl.Tracks[i].MediaFile.ID = pl.Tracks[i].MediaFileID
-			}
-
-			if err := playlistRepo.Put(pl); err != nil {
-				return err
-			}
-		}
-	}
-
-	log.Info("Pass 3: Update play queue track references")
-	for _, user := range users {
-		playQueueRepo := ds.PlayQueue(request.WithUser(ctx, user))
-		playQueue, err := playQueueRepo.Retrieve(user.ID)
-		if err != nil {
-			if errors.Is(err, model.ErrNotFound) {
-				continue
-			}
-			return err
-		}
-
-		playQueue.Current = mbmap.maybeGet(playQueue.Current, 0)
-
-		for i := range playQueue.Items {
-			playQueue.Items[i].ID = mbmap.maybeGet(playQueue.Items[i].ID, 0)
-		}
-
-		if err := playQueueRepo.Store(playQueue); err != nil {
-			return err
-		}
-
-	}
-
-	log.Info(fmt.Sprintf("Pass 4: Cleanup %v leftover tracks", len(toRemove)))
-	return utils.RangeByChunks(toRemove, 100, func(s []string) error {
-		return mfRepo.DeleteMany(s...)
-	})
-}
-
 type deleteManyable interface {
 	DeleteMany(ids ...string) error
 }
@@ -348,7 +73,7 @@ func deleteManyIDs(repo deleteManyable, ids map[string]bool) error {
 	})
 }
 
-func migrateUserPlaylists(ctx context.Context, ds model.DataStore, user model.User, ndIdToMbzId map[string]string) error {
+func migrateUserPlaylists(ctx context.Context, ds model.DataStore, user model.User, ndIdToMbz map[string]*model.MediaFile) error {
 	var err error
 
 	repo := ds.Playlist(request.WithUser(ctx, user))
@@ -363,9 +88,11 @@ func migrateUserPlaylists(ctx context.Context, ds model.DataStore, user model.Us
 			return err2
 		}
 
-		for i := range newPlaylist.Tracks {
-			newPlaylist.Tracks[i].MediaFileID = ndIdToMbzId[newPlaylist.Tracks[i].MediaFileID]
-			newPlaylist.Tracks[i].MediaFile.ID = newPlaylist.Tracks[i].MediaFileID
+		for i, track := range newPlaylist.Tracks {
+			if newTrack, found := ndIdToMbz[track.MediaFileID]; found {
+				newPlaylist.Tracks[i].MediaFileID = newTrack.ID
+				newPlaylist.Tracks[i].MediaFile.ID = newTrack.ID
+			}
 		}
 
 		if err2 = repo.Put(newPlaylist); err2 != nil {
@@ -375,7 +102,7 @@ func migrateUserPlaylists(ctx context.Context, ds model.DataStore, user model.Us
 	return nil
 }
 
-func migrateUserPlayQueue(ctx context.Context, ds model.DataStore, user model.User, ndIdToMbzId map[string]string) error {
+func migrateUserPlayQueue(ctx context.Context, ds model.DataStore, user model.User, ndIdToMbz map[string]*model.MediaFile) error {
 	repo := ds.PlayQueue(request.WithUser(ctx, user))
 	playQueue, err := repo.Retrieve(user.ID)
 	if err != nil {
@@ -386,10 +113,14 @@ func migrateUserPlayQueue(ctx context.Context, ds model.DataStore, user model.Us
 		return err
 	}
 
-	playQueue.Current = ndIdToMbzId[playQueue.Current]
+	if newTrack, found := ndIdToMbz[playQueue.Current]; found {
+		playQueue.Current = newTrack.ID
+	}
 
-	for i := range playQueue.Items {
-		playQueue.Items[i].ID = xxx[playQueue.Items[i].ID]
+	for i, item := range playQueue.Items {
+		if newTrack, found := ndIdToMbz[item.ID]; found {
+			playQueue.Items[i].ID = newTrack.ID
+		}
 	}
 
 	return repo.Store(playQueue)
@@ -411,7 +142,8 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 		return err
 	}
 
-	mediaFileIdMap := make(map[string]*model.MediaFile, len(mediaFiles))
+	oldToNewMF := make(map[string]*model.MediaFile, len(mediaFiles))
+
 	newMediaFiles := make(map[string]*model.MediaFile, len(mediaFiles))
 	newArtists := make(map[string]*model.Artist)
 	newAlbums := make(map[string]*model.Album)
@@ -420,9 +152,7 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 	oldArtists := map[string]bool{}
 	oldAlbums := map[string]bool{}
 
-	for i, mf := range mediaFiles {
-		mediaFileIdMap[mf.ID] = &mediaFiles[i]
-
+	for _, mf := range mediaFiles {
 		// Don't touch partial files. The final rescan should take care of them.
 		if mf.MbzTrackID == "" || mf.MbzAlbumID == "" || mf.MbzArtistID == "" || mf.MbzAlbumArtistID == "" {
 			continue
@@ -433,15 +163,19 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 		oldArtists[mf.AlbumArtistID] = true
 		oldAlbums[mf.AlbumID] = true
 
-		if newMediaFile, ok := newMediaFiles[mf.MbzTrackID]; !ok {
+		newID := fmt.Sprintf("%v-%v", mf.MbzAlbumID, mf.MbzTrackID)
+
+		if newMediaFile, ok := newMediaFiles[newID]; !ok {
 			newMediaFile = &model.MediaFile{}
 			*newMediaFile = mf
 
-			newMediaFile.ID = mf.MbzTrackID
+			newMediaFile.ID = newID
 			newMediaFile.AlbumID = mf.MbzAlbumID
 			newMediaFile.ArtistID = mf.MbzArtistID
 			newMediaFile.AlbumArtistID = mf.MbzAlbumArtistID
-			newMediaFiles[mf.MbzTrackID] = newMediaFile
+			newMediaFiles[newID] = newMediaFile
+
+			oldToNewMF[mf.ID] = newMediaFile
 		}
 
 		if _, ok := newArtists[mf.MbzArtistID]; !ok {
@@ -455,6 +189,7 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 		if _, ok := newAlbums[mf.MbzAlbumID]; !ok {
 			newAlbums[mf.MbzAlbumID] = &model.Album{
 				ID:               mf.MbzAlbumID,
+				ArtistID:         mf.MbzArtistID,
 				AlbumArtistID:    mf.MbzAlbumArtistID,
 				MbzAlbumID:       mf.MbzAlbumID,
 				MbzAlbumArtistID: mf.MbzAlbumArtistID,
@@ -475,8 +210,6 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 			newArtist.ID = tmp.ID
 			newArtist.MbzArtistID = tmp.MbzArtistID
 		}
-
-		oldArtists[artist.ID] = true
 	}
 
 	albums, err := albumRepo.GetAll()
@@ -489,22 +222,34 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 			tmp := *newAlbum
 			*newAlbum = album
 			newAlbum.ID = tmp.ID
+			newAlbum.ArtistID = tmp.ArtistID
 			newAlbum.AlbumArtistID = tmp.AlbumArtistID
 			newAlbum.MbzAlbumID = tmp.MbzAlbumID
 			newAlbum.MbzAlbumArtistID = tmp.MbzAlbumArtistID
+			newAlbum.AllArtistIDs = "" // Nuking this, the rescan will fix it
 		}
-
-		oldAlbums[album.ID] = true
 	}
 
 	log.Info("Pass 2: Add new artists")
-	// TODO: add new artists
+	for _, artist := range newArtists {
+		if err = artistRepo.Put(artist); err != nil {
+			return err
+		}
+	}
 
 	log.Info("Pass 3: Add new albums")
-	// TODO: add new albums
+	for _, album := range newAlbums {
+		if err = albumRepo.Put(album); err != nil {
+			return err
+		}
+	}
 
 	log.Info("Pass 4: Add new tracks")
-	// TODO: add new mediafiles
+	for _, mf := range newMediaFiles {
+		if err = mfRepo.Put(mf); err != nil {
+			return err
+		}
+	}
 
 	// Playlists and Play queues require a user in the context
 	users, err := userRepo.GetAll()
@@ -514,14 +259,14 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 
 	log.Info("Pass 5: Update playlist references")
 	for _, user := range users {
-		if err = migrateUserPlaylists(ctx, ds, user, nil); err != nil {
+		if err = migrateUserPlaylists(ctx, ds, user, oldToNewMF); err != nil {
 			return err
 		}
 	}
 
 	log.Info("Pass 6: Update play queue references")
 	for _, user := range users {
-		if err = migrateUserPlayQueue(ctx, ds, user, nil); err != nil {
+		if err = migrateUserPlayQueue(ctx, ds, user, oldToNewMF); err != nil {
 			return err
 		}
 	}
@@ -542,6 +287,7 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 	}
 
 	return nil
+	//return ds.GC(ctx, "")
 }
 
 func convertToMbzIDs(ctx context.Context) error {
@@ -572,21 +318,6 @@ func convertToMbzIDs(ctx context.Context) error {
 		if err := migrateEverything(ctx, tx); err != nil {
 			return err
 		}
-
-		//log.Info("Migrating artists...")
-		//if err := migrateArtists(ctx, tx); err != nil {
-		//	return err
-		//}
-		//
-		//log.Info("Migrating albums...")
-		//if err := migrateAlbums(ctx, tx); err != nil {
-		//	return err
-		//}
-
-		//log.Info("Migrating tracks...")
-		//if err = migrateMediaFiles(ctx, tx); err != nil {
-		//	return err
-		//}
 
 		if err = props.Put(model.PropUsingMbzIDs, "true"); err != nil {
 			return err
