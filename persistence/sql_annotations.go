@@ -95,7 +95,7 @@ func (r sqlRepository) cleanAnnotations() error {
 	return nil
 }
 
-func (r sqlRepository) MoveAnnotation(fromID string, toID string) error {
+func (r sqlRepository) CopyAnnotation(fromID string, toID string) error {
 	if fromID == toID {
 		return nil
 	}
