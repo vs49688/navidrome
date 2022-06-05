@@ -36,7 +36,7 @@ var mbzIdCmd = &cobra.Command{
 
 func init() {
 	mbzIdCmd.Flags().BoolVar(&mbzidNoScan, "no-scan", false, `don't re-scan afterwards.
-WARNING: Your database will be in an inconsistent state unless a full-rescan is completed.`)
+WARNING: Your database will be in an inconsistent state unless a full rescan is completed.`)
 	mbzIdCmd.Flags().BoolVar(&mbzidNoConfirm, "no-confirm", false, "don't ask for confirmation")
 	rootCmd.AddCommand(mbzIdCmd)
 }
@@ -198,6 +198,8 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 
 	}
 
+	// Attempt to salvage some artist/album information.
+	// This part is technically not needed, it can all be recovered by the final rescan/
 	artists, err := artistRepo.GetAll()
 	if err != nil {
 		return err
@@ -287,7 +289,6 @@ func migrateEverything(ctx context.Context, ds model.DataStore) error {
 	}
 
 	return nil
-	//return ds.GC(ctx, "")
 }
 
 func convertToMbzIDs(ctx context.Context) error {
