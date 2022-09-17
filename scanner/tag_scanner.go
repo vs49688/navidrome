@@ -83,7 +83,11 @@ func (s *TagScanner) Scan(ctx context.Context, lastModifiedSince time.Time, prog
 	allFSDirs := dirMap{}
 	var changedDirs []string
 	s.cnt = &counters{}
-	genres := newCachedGenreRepository(ctx, s.ds.Genre(ctx))
+
+	genres := s.ds.Genre(ctx)
+	if !conf.Server.DevDisableGenreCache {
+		genres = newCachedGenreRepository(ctx, genres)
+	}
 
 	useMbzIds, err := s.ds.Property(ctx).DefaultGetBool(model.PropUsingMbzIDs, false)
 	if err != nil {

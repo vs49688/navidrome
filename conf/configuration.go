@@ -76,6 +76,7 @@ type configOptions struct {
 	DevSidebarPlaylists        bool
 	DevEnableBufferedScrobble  bool
 	DevShowArtistPage          bool
+	DevDisableGenreCache       bool
 }
 
 type scannerOptions struct {
