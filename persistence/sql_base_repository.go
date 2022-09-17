@@ -185,7 +185,16 @@ func (r sqlRepository) count(countQuery SelectBuilder, options ...model.QueryOpt
 }
 
 func (r sqlRepository) put(id string, m interface{}, colsToUpdate ...string) (newId string, err error) {
+	logTheFuck := false
+	if _, ok := m.(*model.Genre); ok {
+		logTheFuck = true
+	}
+
 	values, _ := toSqlArgs(m)
+	if logTheFuck {
+		fmt.Printf("XXXSQL: toSqlArgs(%v) -> %v\n", m, values)
+	}
+
 	// If there's an ID, try to update first
 	if id != "" {
 		updateValues := map[string]interface{}{}
@@ -203,7 +212,16 @@ func (r sqlRepository) put(id string, m interface{}, colsToUpdate ...string) (ne
 
 		delete(updateValues, "created_at")
 		update := Update(r.tableName).Where(Eq{"id": id}).SetMap(updateValues)
+
+		if logTheFuck {
+			ssql, args, _ := update.ToSql()
+			fmt.Printf("XXXSQL/update.toSql() %v, %v\n", ssql, args)
+		}
+
 		count, err := r.executeSQL(update)
+		if logTheFuck {
+			fmt.Printf("XXXSQL/executeSQL: %v, %v", count, err)
+		}
 		if err != nil {
 			return "", err
 		}
@@ -215,9 +233,20 @@ func (r sqlRepository) put(id string, m interface{}, colsToUpdate ...string) (ne
 	if id == "" {
 		id = uuid.NewString()
 		values["id"] = id
+
+		if logTheFuck {
+			fmt.Printf("XXXSQL/uuid.NewString: %v\n", id)
+		}
 	}
+
 	insert := Insert(r.tableName).SetMap(values)
 	_, err = r.executeSQL(insert)
+
+	if logTheFuck {
+		ssql, args, _ := insert.ToSql()
+		fmt.Printf("XXXSQL/insert.toSql() %v, %v\n", ssql, args)
+	}
+
 	return id, err
 }
 
