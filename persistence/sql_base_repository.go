@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -160,8 +161,15 @@ func (r sqlRepository) queryAll(sq Sqlizer, response interface{}) error {
 	if err != nil {
 		return err
 	}
+
 	start := time.Now()
 	c, err := r.ormer.Raw(query, args...).QueryRows(response)
+
+	if _, ok := response.(*model.Genres); ok {
+		b, _ := json.Marshal(args)
+		log.Debug("XXX: queryAll()", "query", query, "args", string(b), "count", c, err)
+	}
+
 	if errors.Is(err, orm.ErrNoRows) {
 		r.logSQL(query, args, nil, c, start)
 		return model.ErrNotFound
