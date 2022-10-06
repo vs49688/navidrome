@@ -36,10 +36,13 @@ type cachedGenreRepo struct {
 }
 
 func (r *cachedGenreRepo) Put(g *model.Genre) error {
+	log.Debug("XXX: cachedGenreRepo/Put() BEGIN", "id", g.ID, "name", g.Name)
 	id, err := r.cache.GetByLoader(strings.ToLower(g.Name), func(key string) (interface{}, time.Duration, error) {
+		log.Debug("XXX: cachedGenreRepo/Put() CACHE MISS", "id", g.ID, "name", g.Name)
 		err := r.GenreRepository.Put(g)
 		return g.ID, 24 * time.Hour, err
 	})
 	g.ID = id.(string)
+	log.Debug("XXX: cachedGenreRepo/Put() END", "id", g.ID, "name", g.Name)
 	return err
 }
