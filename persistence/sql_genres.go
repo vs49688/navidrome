@@ -1,7 +1,9 @@
 package persistence
 
 import (
+	"encoding/json"
 	. "github.com/Masterminds/squirrel"
+	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/utils"
 )
@@ -12,10 +14,26 @@ func (r sqlRepository) withGenres(sql SelectBuilder) SelectBuilder {
 }
 
 func (r *sqlRepository) updateGenres(id string, tableName string, genres model.Genres) error {
+
+	if tableName == "media_file" {
+		b, _ := json.Marshal(genres)
+		log.Debug("XXX: media_file updateGenres() called", "id", id, "genres", string(b))
+	}
+
+	if tableName == "media_file" {
+		log.Debug("XXX: media_file updateGenres()/Delete() BEGIN", "id", id)
+	}
 	del := Delete(tableName + "_genres").Where(Eq{tableName + "_id": id})
 	_, err := r.executeSQL(del)
 	if err != nil {
+		if tableName == "media_file" {
+			log.Debug("XXX: media_file updateGenres()/Delete() END/FAIL", "id", id, err)
+		}
 		return err
+	}
+
+	if tableName == "media_file" {
+		log.Debug("XXX: media_file updateGenres()/Delete() END/SUCCESS", "id", id)
 	}
 
 	if len(genres) == 0 {
@@ -30,7 +48,15 @@ func (r *sqlRepository) updateGenres(id string, tableName string, genres model.G
 		for _, gid := range ids {
 			ins = ins.Values(gid, id)
 		}
+
+		if tableName == "media_file" {
+			log.Debug("XXX: media_file updateGenres()/Insert() BEGIN", "id", id)
+		}
 		_, err = r.executeSQL(ins)
+
+		if tableName == "media_file" {
+			log.Debug("XXX: media_file updateGenres()/Insert() END", "id", id, err)
+		}
 		return err
 	})
 	return err
