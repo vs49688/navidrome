@@ -15,9 +15,15 @@ func newCachedGenreRepository(ctx context.Context, repo model.GenreRepository) m
 		GenreRepository: repo,
 		ctx:             ctx,
 	}
+
+	log.Debug("XXX: newCachedGenreResository() BEGIN")
+
+	log.Debug("XXX: newCachedGenreResository()/GetAll() BEGIN")
 	genres, err := repo.GetAll()
+	log.Debug("XXX: newCachedGenreResository()/GetAll() END", "count", len(genres), err)
 	if err != nil {
 		log.Error(ctx, "Could not load genres from DB", err)
+		log.Debug("XXX: newCachedGenreResository() END", err)
 		return repo
 	}
 
@@ -29,6 +35,7 @@ func newCachedGenreRepository(ctx context.Context, repo model.GenreRepository) m
 
 	log.Debug("XXX: newCachedGenreResository() CACHED", "count", len(genres))
 
+	log.Debug("XXX: newCachedGenreResository() END/SUCCESS")
 	return r
 }
 
