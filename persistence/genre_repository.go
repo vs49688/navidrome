@@ -38,17 +38,22 @@ func (r *genreRepository) GetAll(opt ...model.QueryOptions) (model.Genres, error
 }
 
 func (r *genreRepository) Put(m *model.Genre) error {
+	log.Debug("XXX: genreRepository/Put() BEGIN", "id", m.ID, "name", m.Name)
 	if m.ID == "" {
 		m.ID = uuid.NewString()
+		log.Debug("XXX: genreRepository/Put() ID UPDATE", "id", m.ID, "name", m.Name)
 	}
 
-	return r.ormer.Raw(`
+	err := r.ormer.Raw(`
 INSERT INTO genre(id, name)
 VALUES(?, ?)
 ON CONFLICT (name) DO UPDATE
 	SET name=excluded.name
 RETURNING id
 `, m.ID, m.Name).QueryRow(&m.ID)
+
+	log.Debug("XXX: genreRepository/Put() END", "id", m.ID, "name", m.Name, err)
+	return err
 }
 
 func (r *genreRepository) Count(options ...rest.QueryOptions) (int64, error) {

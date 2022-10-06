@@ -2,7 +2,9 @@ package scanner
 
 import (
 	"crypto/md5"
+	"encoding/json"
 	"fmt"
+	"github.com/navidrome/navidrome/log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +35,7 @@ func newMediaFileMapper(rootFolder string, genres model.GenreRepository, useMbzI
 
 // TODO Move most of these mapping functions to setters in the model.MediaFile
 func (s mediaFileMapper) toMediaFile(md metadata.Tags) model.MediaFile {
+	log.Debug("XXX: toMediaFile() BEGIN", "path", md.FilePath())
 	mf := &model.MediaFile{}
 	mf.ID = s.trackID(md)
 	mf.Title = s.mapTrackTitle(md)
@@ -78,6 +81,7 @@ func (s mediaFileMapper) toMediaFile(md metadata.Tags) model.MediaFile {
 	mf.CreatedAt = time.Now()
 	mf.UpdatedAt = md.ModificationTime()
 
+	log.Debug("XXX: toMediaFile() END", "path", md.FilePath())
 	return *mf
 }
 
@@ -167,6 +171,8 @@ func (s mediaFileMapper) albumArtistID(md metadata.Tags) string {
 }
 
 func (s mediaFileMapper) mapGenres(genres []string) (string, model.Genres) {
+	log.Debug("XXX: mapGenres() BEGIN", "genres", genres)
+
 	var result model.Genres
 	unique := map[string]struct{}{}
 	var all []string
@@ -190,7 +196,11 @@ func (s mediaFileMapper) mapGenres(genres []string) (string, model.Genres) {
 		result = append(result, genre)
 	}
 	if len(result) == 0 {
+		log.Debug("XXX: mapGenres() END/SUCCESS/EMPTY", "genres", genres)
 		return "", nil
 	}
+
+	b, _ := json.Marshal(result)
+	log.Debug("XXX: mapGenres() END/SUCCESS/NONEMPTY", "genres", genres, "out_genre", string(b), "name", result[0].Name)
 	return result[0].Name, result
 }
