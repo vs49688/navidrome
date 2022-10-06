@@ -36,9 +36,10 @@ func (r *genreRepository) GetAll(opt ...model.QueryOptions) (model.Genres, error
 }
 
 func (r *genreRepository) Put(m *model.Genre) error {
+	log.Debug("XXX: genreRepository/Put() BEGIN", "id", m.ID, "name", m.Name)
 	id, err := r.put(m.ID, m)
 	m.ID = id
-	log.Debug("XXX: genreRepository/Put()", "id", m.ID, "name", m.Name, err)
+	log.Debug("XXX: genreRepository/Put() END", "id", m.ID, "name", m.Name, err)
 	return err
 }
 
