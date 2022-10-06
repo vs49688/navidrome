@@ -23,8 +23,11 @@ func newCachedGenreRepository(ctx context.Context, repo model.GenreRepository) m
 
 	r.cache = ttlcache.NewCache()
 	for _, g := range genres {
+		log.Debug("XXX: newCachedGenreResository() CACHE", "name", strings.ToLower(g.Name), "id", g.ID)
 		_ = r.cache.Set(strings.ToLower(g.Name), g.ID)
 	}
+
+	log.Debug("XXX: newCachedGenreResository() CACHED", "count", len(genres))
 
 	return r
 }
