@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"time"
 
 	"github.com/navidrome/navidrome/db"
@@ -13,7 +14,6 @@ import (
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/model/request"
 	"github.com/navidrome/navidrome/persistence"
-	"github.com/navidrome/navidrome/utils/slice"
 	"github.com/spf13/cobra"
 )
 
@@ -68,9 +68,13 @@ func deleteManyIDs(repo deleteManyable, ids map[string]bool) error {
 		s = append(s, id)
 	}
 
-	return slice.RangeByChunks(s, 100, func(s []string) error {
-		return repo.DeleteMany(s...)
-	})
+	for chunk := range slices.Chunk(s, 100) {
+		if err := repo.DeleteMany(chunk...); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func migrateUserPlaylists(ctx context.Context, ds model.DataStore, user model.User, ndIdToMbz map[string]*model.MediaFile) error {
